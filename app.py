@@ -123,7 +123,7 @@ else:
     with st.sidebar.expander("🔗 Share Dashboard Links"):
         selected_role = st.radio("Select Access Level:", ["Editor (Full Access)", "Viewer (Read Only)"], key="share_mode_select")
         
-        base_url = "http://localhost:8501" # Deployment ke baad yahan apna live domain daal dena
+        base_url = "https://agentic-analytics-dashboard-globally.streamlit.app/" # Deployment ke baad yahan apna live domain daal dena
         target_mode = "editor" if "Editor" in selected_role else "viewer"
         generated_link = f"{base_url}/?mode={target_mode}"
         
