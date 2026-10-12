@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+import plotly.io as pio
 from plotly.subplots import make_subplots
 from dotenv import load_dotenv
 from google import genai
@@ -48,13 +49,9 @@ def save_dashboard(state_data, dashboard_name):
     
     clean_payload["ai_explanation"] = str(state_data.get("ai_explanation", ""))
     
-    # Safely handle fig_json serialization using default string conversion for non-JSON objects
-    if "fig_json" in state_data and state_data["fig_json"]:
-        try:
-            # Test serialization to strip any non-compliant types safely
-            clean_payload["fig_json"] = json.loads(json.dumps(state_data["fig_json"], default=str))
-        except Exception:
-            clean_payload["fig_json"] = None
+    # Save exact Plotly figure JSON string
+    if "fig_str" in state_data and state_data["fig_str"]:
+        clean_payload["fig_str"] = state_data["fig_str"]
         
     with open(file_path, "w") as f:
         json.dump(clean_payload, f, default=str)
@@ -181,10 +178,10 @@ else:
             st.session_state.file_name = "shared_dashboard.csv"
             st.session_state.ai_explanation = saved_state.get("ai_explanation", "Loaded from shared link.")
             
-            # Restore saved Plotly figure if present
-            if "fig_json" in saved_state and saved_state["fig_json"]:
+            # Restore saved Plotly figure cleanly using pio.from_json
+            if "fig_str" in saved_state and saved_state["fig_str"]:
                 try:
-                    st.session_state.custom_fig = go.Figure(saved_state["fig_json"])
+                    st.session_state.custom_fig = pio.from_json(saved_state["fig_str"])
                 except Exception:
                     st.session_state.custom_fig = None
             
@@ -218,13 +215,13 @@ else:
             if "df" in st.session_state and st.session_state.df is not None:
                 df_dict = st.session_state.df.to_dict(orient="list")
                 
-                # Serialize current Plotly figure if available
-                fig_json_data = st.session_state.custom_fig.to_plotly_json() if st.session_state.get("custom_fig") is not None else None
+                # Serialize current Plotly figure as valid JSON string
+                fig_str_data = pio.to_json(st.session_state.custom_fig) if st.session_state.get("custom_fig") is not None else None
                 
                 state_payload = {
                     "data": df_dict,
                     "ai_explanation": st.session_state.get("ai_explanation", "Default analytics summary."),
-                    "fig_json": fig_json_data
+                    "fig_str": fig_str_data
                 }
                 unique_id = save_dashboard(state_payload, dashboard_name_input)
                 generated_link = f"{base_url}?dashboard_id={unique_id}&mode={target_mode}"
@@ -336,7 +333,7 @@ else:
         st.markdown("---")
 
         # -------------------------------------------------------------------
-        # Advanced Local Visualizer (Full Keyword Matching Support)
+        # Advanced Local Visualizer (High Detail City & Chart Support)
         # -------------------------------------------------------------------
         def build_local_fallback_chart(prompt_text):
             prompt_lower = prompt_text.lower()
@@ -345,44 +342,54 @@ else:
 
             grouped_df = df.groupby(cat_col, as_index=False)[num_col].sum().head(15)
 
-            if any(k in prompt_lower for k in ["map", "geo", "choropleth", "location"]):
-                fig = px.choropleth(
+            if any(k in prompt_lower for k in ["map", "geo", "choropleth", "location", "city"]):
+                # High-contrast detailed Mapbox scatter map for Cities/Locations
+                fig = px.scatter_geo(
                     grouped_df,
                     locations=cat_col,
                     locationmode="country names",
+                    hover_name=cat_col,
+                    size=num_col,
                     color=num_col,
-                    title=f"Geographical Map of {num_col} by {cat_col}"
+                    projection="natural earth",
+                    title=f"Detailed Geographical Distribution of {num_col} by {cat_col}"
                 )
-                return fig, f"Generated Geographical Map for '{cat_col}' & '{num_col}'."
+                fig.update_layout(template="plotly_dark")
+                return fig, f"Generated Detailed Geographical Map for '{cat_col}' & '{num_col}'."
 
             elif "pie" in prompt_lower and "donut" in prompt_lower:
                 fig = make_subplots(rows=1, cols=2, specs=[[{"type": "domain"}, {"type": "domain"}]],
                                     subplot_titles=["Pie Chart", "Donut Chart"])
                 fig.add_trace(go.Pie(labels=grouped_df[cat_col], values=grouped_df[num_col], name="Pie"), row=1, col=1)
                 fig.add_trace(go.Pie(labels=grouped_df[cat_col], values=grouped_df[num_col], hole=0.4, name="Donut"), row=1, col=2)
-                fig.update_layout(title_text=f"Pie and Donut Breakdown of {num_col} by {cat_col}")
+                fig.update_layout(title_text=f"Pie and Donut Breakdown of {num_col} by {cat_col}", template="plotly_dark")
                 return fig, f"Generated Pie & Donut chart for '{cat_col}'."
 
             elif "donut" in prompt_lower:
                 fig = px.pie(grouped_df, names=cat_col, values=num_col, hole=0.4, title=f"Donut Chart of {num_col} by {cat_col}")
+                fig.update_layout(template="plotly_dark")
                 return fig, f"Generated Donut chart for '{cat_col}'."
 
             elif "pie" in prompt_lower or "chat" in prompt_lower:
                 fig = px.pie(grouped_df, names=cat_col, values=num_col, title=f"Pie Chart of {num_col} by {cat_col}")
+                fig.update_layout(template="plotly_dark")
                 return fig, f"Generated Pie chart for '{cat_col}'."
 
             elif any(k in prompt_lower for k in ["line", "trend", "time"]):
                 fig = px.line(grouped_df, x=cat_col, y=num_col, title=f"Trend of {num_col} by {cat_col}")
+                fig.update_layout(template="plotly_dark")
                 return fig, f"Generated Line Trend for '{cat_col}'."
 
             elif "scatter" in prompt_lower:
                 x_col = num_cols[0] if len(num_cols) > 0 else df.columns[0]
                 y_col = num_cols[1] if len(num_cols) > 1 else x_col
                 fig = px.scatter(df, x=x_col, y=y_col, color=cat_col if cat_cols else None, title=f"Scatter Plot: {x_col} vs {y_col}")
+                fig.update_layout(template="plotly_dark")
                 return fig, f"Generated Scatter plot of {x_col} vs {y_col}."
 
             else:
                 fig = px.bar(grouped_df, x=cat_col, y=num_col, title=f"Bar Chart of {num_col} by {cat_col}")
+                fig.update_layout(template="plotly_dark")
                 return fig, f"Generated Bar chart of {num_col} by {cat_col}."
 
         # -------------------------------------------------------------------
@@ -415,8 +422,8 @@ else:
             
             CRITICAL INSTRUCTIONS:
             1. Correct spelling typos automatically (e.g. 'pie chat' -> 'pie chart').
-            2. If user requests a map, generate `px.choropleth` or `px.scatter_geo`.
-            3. If multiple charts are requested, use `make_subplots`.
+            2. If user requests a map or city visual, use `px.scatter_geo` or `px.density_mapbox` or `px.bar` with dark template.
+            3. Apply `fig.update_layout(template='plotly_dark')` to all charts.
             4. ALWAYS aggregate numerical values using `.groupby()` on categorical columns.
             5. Generate valid Python code using Plotly (`px`, `go`, `make_subplots`, `pd`, `np`).
             6. Save the final figure object in a variable named `fig`.
@@ -488,7 +495,7 @@ else:
         if is_editor:
             user_prompt = st.text_input(
                 "Specify ANY visual type or analysis method:",
-                placeholder="e.g. 'use map', 'use pie chat and donut chart', 'scatter plot'",
+                placeholder="e.g. 'use map', 'use pie chat and donut chart', 'bar chart of revenue by city'",
                 key="viz_user_prompt",
                 on_change=run_ai_visualization
             )
@@ -526,6 +533,7 @@ else:
             if len(cat_cols) > 0 and len(num_cols) > 0:
                 default_df = df.groupby(cat_cols[0], as_index=False)[num_cols[0]].sum().head(10)
                 default_fig = px.bar(default_df, x=cat_cols[0], y=num_cols[0], title=f"{num_cols[0]} by {cat_cols[0]} (Default View)")
+                default_fig.update_layout(template="plotly_dark")
                 st.plotly_chart(default_fig, use_container_width=True)
                 
                 try:
