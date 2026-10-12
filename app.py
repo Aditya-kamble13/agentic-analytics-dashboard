@@ -13,6 +13,8 @@ import plotly.io as pio
 from plotly.subplots import make_subplots
 from dotenv import load_dotenv
 from google import genai
+from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
 
 # Load environment variables
 load_dotenv()
@@ -49,7 +51,6 @@ def save_dashboard(state_data, dashboard_name):
     
     clean_payload["ai_explanation"] = str(state_data.get("ai_explanation", ""))
     
-    # Save exact Plotly figure JSON string
     if "fig_str" in state_data and state_data["fig_str"]:
         clean_payload["fig_str"] = state_data["fig_str"]
         
@@ -69,7 +70,7 @@ if "launched" not in st.session_state:
     st.session_state.launched = False
 
 # -------------------------------------------------------------------
-# Futuristic Landing / Welcome Page (Dark Theme & Header Fix)
+# Futuristic Landing / Welcome Page
 # -------------------------------------------------------------------
 if not st.session_state.launched:
     st.markdown("""
@@ -164,13 +165,12 @@ if not st.session_state.launched:
             st.rerun()
 
 else:
-    # Read query params from URL quietly in background
+    # Read query params from URL
     query_params = st.query_params
     mode_param = query_params.get("mode", "editor")
     dashboard_id_param = query_params.get("dashboard_id", None)
     is_editor = (mode_param == "editor")
 
-    # Load shared dashboard state automatically if dashboard_id is provided in URL
     if dashboard_id_param and "df" not in st.session_state:
         saved_state = load_dashboard(dashboard_id_param)
         if saved_state:
@@ -178,14 +178,12 @@ else:
             st.session_state.file_name = "shared_dashboard.csv"
             st.session_state.ai_explanation = saved_state.get("ai_explanation", "Loaded from shared link.")
             
-            # Restore saved Plotly figure cleanly using pio.from_json
             if "fig_str" in saved_state and saved_state["fig_str"]:
                 try:
                     st.session_state.custom_fig = pio.from_json(saved_state["fig_str"])
                 except Exception:
                     st.session_state.custom_fig = None
             
-            # Auto-skip landing page when opening a shared unique link
             st.session_state.launched = True
         else:
             st.error("Shared dashboard not found or expired.")
@@ -203,7 +201,6 @@ else:
 
     st.sidebar.markdown("---")
 
-    # Clean Interactive Share Expander
     with st.sidebar.expander("🔗 Share Dashboard Links"):
         dashboard_name_input = st.text_input("Dashboard Name", value="My-Custom-Dashboard")
         selected_role = st.radio("Select Access Level:", ["Editor (Full Access)", "Viewer (Read Only)"], key="share_mode_select")
@@ -214,8 +211,6 @@ else:
         if st.button("Generate Unique Link"):
             if "df" in st.session_state and st.session_state.df is not None:
                 df_dict = st.session_state.df.to_dict(orient="list")
-                
-                # Serialize current Plotly figure as valid JSON string
                 fig_str_data = pio.to_json(st.session_state.custom_fig) if st.session_state.get("custom_fig") is not None else None
                 
                 state_payload = {
@@ -230,7 +225,6 @@ else:
             else:
                 st.warning("Please upload a dataset first to generate a unique link!")
 
-    # File uploader is only available for editors
     if is_editor:
         uploaded_file = st.sidebar.file_uploader("Upload CSV or Excel Dataset", type=["csv", "xlsx", "xls"])
         if uploaded_file is not None:
@@ -257,7 +251,7 @@ else:
             st.session_state.last_error = None
 
         # -------------------------------------------------------------------
-        # Step 1: AI Data Hygiene Agent (Disabled for Viewers)
+        # Step 1: AI Data Hygiene Agent
         # -------------------------------------------------------------------
         st.header("🛠️ Step 1: AI Data Hygiene Agent")
 
@@ -333,64 +327,126 @@ else:
         st.markdown("---")
 
         # -------------------------------------------------------------------
-        # Advanced Local Visualizer (High Detail City & Chart Support)
+        # Geocoding Map Visual Generator Function (Clean Title)
+        # -------------------------------------------------------------------
+        def generate_geocoded_map(grouped_data, location_column, value_column):
+            geolocator = Nominatim(user_agent="agentic_analytics_dashboard_app")
+            geocode = RateLimiter(geolocator.geocode, min_delay_seconds=0.1)
+            
+            lats = []
+            lons = []
+            valid_locations = []
+            values = []
+            
+            for _, row in grouped_data.iterrows():
+                loc_name = str(row[location_column])
+                val = row[value_column]
+                try:
+                    loc = geocode(loc_name)
+                    if loc:
+                        lats.append(loc.latitude)
+                        lons.append(loc.longitude)
+                        valid_locations.append(loc_name)
+                        values.append(val)
+                except Exception:
+                    continue
+
+            if valid_locations:
+                geo_df = pd.DataFrame({
+                    'Location': valid_locations,
+                    'Latitude': lats,
+                    'Longitude': lons,
+                    'Value': values
+                })
+                fig = px.scatter_geo(
+                    geo_df,
+                    lat='Latitude',
+                    lon='Longitude',
+                    size='Value',
+                    color='Value',
+                    hover_name='Location',
+                    color_continuous_scale="Plasma",
+                    projection="natural earth",
+                    title=f"Interactive Geographic Map: {value_column} by {location_column}"
+                )
+                fig.update_layout(template="plotly_dark", geo=dict(bgcolor='#0b0f19', showland=True, landcolor='#111827'))
+                return fig
+            return None
+
+        # -------------------------------------------------------------------
+        # Advanced Local Visualizer Engine
         # -------------------------------------------------------------------
         def build_local_fallback_chart(prompt_text):
             prompt_lower = prompt_text.lower()
-            cat_col = cat_cols[0] if cat_cols else df.columns[0]
-            num_col = num_cols[0] if num_cols else df.columns[-1]
+            
+            target_cat = cat_cols[0] if cat_cols else df.columns[0]
+            target_num = num_cols[0] if num_cols else df.columns[-1]
+            
+            for col in cat_cols:
+                if col.lower() in prompt_lower:
+                    target_cat = col
+                    break
+            for col in num_cols:
+                if col.lower() in prompt_lower:
+                    target_num = col
+                    break
 
-            grouped_df = df.groupby(cat_col, as_index=False)[num_col].sum().head(15)
+            grouped_df = df.groupby(target_cat, as_index=False)[target_num].sum().sort_values(by=target_num, ascending=False).head(20)
 
             if any(k in prompt_lower for k in ["map", "geo", "choropleth", "location", "city"]):
-                # High-contrast detailed Mapbox scatter map for Cities/Locations
-                fig = px.scatter_geo(
+                map_fig = generate_geocoded_map(grouped_df, target_cat, target_num)
+                if map_fig:
+                    return map_fig, f"Generated Interactive Geographical Map for '{target_cat}'."
+                
+                fig = px.bar(
                     grouped_df,
-                    locations=cat_col,
-                    locationmode="country names",
-                    hover_name=cat_col,
-                    size=num_col,
-                    color=num_col,
-                    projection="natural earth",
-                    title=f"Detailed Geographical Distribution of {num_col} by {cat_col}"
+                    x=target_cat,
+                    y=target_num,
+                    text=target_num,
+                    color=target_num,
+                    color_continuous_scale="Viridis",
+                    title=f"Geographic Analytics: {target_num} by {target_cat}"
                 )
-                fig.update_layout(template="plotly_dark")
-                return fig, f"Generated Detailed Geographical Map for '{cat_col}' & '{num_col}'."
+                fig.update_traces(texttemplate='%{text:.2s}', textposition='outside')
+                fig.update_layout(template="plotly_dark", xaxis_tickangle=-45)
+                return fig, f"Generated Geographic Data Chart for '{target_cat}' & '{target_num}'."
 
             elif "pie" in prompt_lower and "donut" in prompt_lower:
                 fig = make_subplots(rows=1, cols=2, specs=[[{"type": "domain"}, {"type": "domain"}]],
                                     subplot_titles=["Pie Chart", "Donut Chart"])
-                fig.add_trace(go.Pie(labels=grouped_df[cat_col], values=grouped_df[num_col], name="Pie"), row=1, col=1)
-                fig.add_trace(go.Pie(labels=grouped_df[cat_col], values=grouped_df[num_col], hole=0.4, name="Donut"), row=1, col=2)
-                fig.update_layout(title_text=f"Pie and Donut Breakdown of {num_col} by {cat_col}", template="plotly_dark")
-                return fig, f"Generated Pie & Donut chart for '{cat_col}'."
+                fig.add_trace(go.Pie(labels=grouped_df[target_cat], values=grouped_df[target_num], name="Pie"), row=1, col=1)
+                fig.add_trace(go.Pie(labels=grouped_df[target_cat], values=grouped_df[target_num], hole=0.4, name="Donut"), row=1, col=2)
+                fig.update_layout(title_text=f"Pie and Donut Breakdown of {target_num} by {target_cat}", template="plotly_dark")
+                return fig, f"Generated Pie & Donut chart for '{target_cat}'."
 
             elif "donut" in prompt_lower:
-                fig = px.pie(grouped_df, names=cat_col, values=num_col, hole=0.4, title=f"Donut Chart of {num_col} by {cat_col}")
+                fig = px.pie(grouped_df, names=target_cat, values=target_num, hole=0.4, title=f"Donut Chart of {target_num} by {target_cat}")
                 fig.update_layout(template="plotly_dark")
-                return fig, f"Generated Donut chart for '{cat_col}'."
+                return fig, f"Generated Donut chart for '{target_cat}'."
 
             elif "pie" in prompt_lower or "chat" in prompt_lower:
-                fig = px.pie(grouped_df, names=cat_col, values=num_col, title=f"Pie Chart of {num_col} by {cat_col}")
+                fig = px.pie(grouped_df, names=target_cat, values=target_num, title=f"Pie Chart of {target_num} by {target_cat}")
                 fig.update_layout(template="plotly_dark")
-                return fig, f"Generated Pie chart for '{cat_col}'."
+                return fig, f"Generated Pie chart for '{target_cat}'."
 
             elif any(k in prompt_lower for k in ["line", "trend", "time"]):
-                fig = px.line(grouped_df, x=cat_col, y=num_col, title=f"Trend of {num_col} by {cat_col}")
+                fig = px.line(grouped_df, x=target_cat, y=target_num, markers=True, title=f"Trend of {target_num} by {target_cat}")
                 fig.update_layout(template="plotly_dark")
-                return fig, f"Generated Line Trend for '{cat_col}'."
-
-            elif "scatter" in prompt_lower:
-                x_col = num_cols[0] if len(num_cols) > 0 else df.columns[0]
-                y_col = num_cols[1] if len(num_cols) > 1 else x_col
-                fig = px.scatter(df, x=x_col, y=y_col, color=cat_col if cat_cols else None, title=f"Scatter Plot: {x_col} vs {y_col}")
-                fig.update_layout(template="plotly_dark")
-                return fig, f"Generated Scatter plot of {x_col} vs {y_col}."
+                return fig, f"Generated Line Trend for '{target_cat}'."
 
             else:
-                fig = px.bar(grouped_df, x=cat_col, y=num_col, title=f"Bar Chart of {num_col} by {cat_col}")
-                fig.update_layout(template="plotly_dark")
-                return fig, f"Generated Bar chart of {num_col} by {cat_col}."
+                fig = px.bar(
+                    grouped_df,
+                    x=target_cat,
+                    y=target_num,
+                    text=target_num,
+                    color=target_num,
+                    color_continuous_scale="Plasma",
+                    title=f"Universal Analytics: {target_num} by {target_cat}"
+                )
+                fig.update_traces(texttemplate='%{text:.2s}', textposition='outside')
+                fig.update_layout(template="plotly_dark", xaxis_tickangle=-45)
+                return fig, f"Generated Analytical Bar Chart for '{target_cat}' & '{target_num}'."
 
         # -------------------------------------------------------------------
         # Step 3: Universal AI Visualization Engine
@@ -422,12 +478,11 @@ else:
             
             CRITICAL INSTRUCTIONS:
             1. Correct spelling typos automatically (e.g. 'pie chat' -> 'pie chart').
-            2. If user requests a map or city visual, use `px.scatter_geo` or `px.density_mapbox` or `px.bar` with dark template.
-            3. Apply `fig.update_layout(template='plotly_dark')` to all charts.
-            4. ALWAYS aggregate numerical values using `.groupby()` on categorical columns.
-            5. Generate valid Python code using Plotly (`px`, `go`, `make_subplots`, `pd`, `np`).
-            6. Save the final figure object in a variable named `fig`.
-            7. Output ONLY JSON in this format:
+            2. Automatically identify the relevant categorical and numerical columns from the dataset.
+            3. ALWAYS aggregate numerical values using `.groupby()` on categorical columns.
+            4. Generate valid Python code using Plotly (`px`, `go`, `make_subplots`, `pd`, `np`) with `template='plotly_dark'`.
+            5. Save the final figure object in a variable named `fig`.
+            6. Output ONLY JSON in this format:
             {{
                 "explanation": "<Short 1-line description of the visualization>",
                 "code": "<executable python code>"
@@ -491,11 +546,10 @@ else:
                 st.session_state.custom_fig = fig
                 st.session_state.ai_explanation = exp
 
-        # AI Prompt Input & Button are strictly available only to Editors
         if is_editor:
             user_prompt = st.text_input(
                 "Specify ANY visual type or analysis method:",
-                placeholder="e.g. 'use map', 'use pie chat and donut chart', 'bar chart of revenue by city'",
+                placeholder="e.g., 'map of revenues by city', 'pie chart', 'trend analysis'",
                 key="viz_user_prompt",
                 on_change=run_ai_visualization
             )
@@ -514,11 +568,9 @@ else:
         st.markdown("---")
         st.subheader("📊 Dynamic Visual Output")
 
-        # Render custom figure if exists, otherwise generate default bar view
         if st.session_state.custom_fig is not None:
             st.plotly_chart(st.session_state.custom_fig, use_container_width=True)
             
-            # Download & Export Visual Option for both Editors and Viewers
             try:
                 chart_html = st.session_state.custom_fig.to_html(include_plotlyjs='cdn')
                 st.download_button(
