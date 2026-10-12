@@ -2,6 +2,7 @@ import os
 import io
 import json
 import time
+import uuid
 import xml.etree.ElementTree as ET
 import streamlit as st
 import pandas as pd
@@ -29,38 +30,98 @@ client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 st.set_page_config(page_title="Universal Agentic Analytics Dashboard", layout="wide")
 
+# Persistent Storage Folder for Unique Dashboards
+DATA_DIR = "saved_dashboards"
+os.makedirs(DATA_DIR, exist_ok=True)
+
+def save_dashboard(state_data, dashboard_name):
+    clean_name = "".join([c if c.isalnum() else "-" for c in dashboard_name.lower()])
+    unique_id = f"{clean_name}-{str(uuid.uuid4())[:8]}"
+    file_path = os.path.join(DATA_DIR, f"{unique_id}.json")
+    with open(file_path, "w") as f:
+        json.dump(state_data, f)
+    return unique_id
+
+def load_dashboard(dashboard_id):
+    file_path = os.path.join(DATA_DIR, f"{dashboard_id}.json")
+    if os.path.exists(file_path):
+        with open(file_path, "r") as f:
+            return json.load(f)
+    return None
+
 # Session state initialization for Landing Page
 if "launched" not in st.session_state:
     st.session_state.launched = False
 
 # -------------------------------------------------------------------
-# Futuristic Landing / Welcome Page
+# Futuristic Landing / Welcome Page (Dark Top Header & UI Fix)
 # -------------------------------------------------------------------
 if not st.session_state.launched:
     st.markdown("""
         <style>
+        /* Dark Theme Canvas & Header Bar Fix */
+        .stApp {
+            background-color: #0b0f19 !important;
+            color: #ffffff !important;
+        }
+        header[data-testid="stHeader"] {
+            background-color: #0b0f19 !important;
+        }
         .main-title {
-            font-size: 3rem;
+            font-size: 3.2rem;
             font-weight: 800;
-            background: linear-gradient(90deg, #4f46e5, #06b6d4);
+            background: linear-gradient(90deg, #6366f1, #06b6d4, #3b82f6);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             text-align: center;
             margin-bottom: 0px;
         }
         .subtitle {
-            font-size: 1.2rem;
-            color: #6b7280;
+            font-size: 1.25rem;
+            color: #94a3b8 !important;
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 35px;
         }
         .feature-card {
-            background-color: #f8fafc;
-            border: 1px solid #e2e8f0;
-            padding: 20px;
-            border-radius: 12px;
+            background-color: #111827 !important;
+            border: 1px solid #1f2937 !important;
+            padding: 24px;
+            border-radius: 16px;
             text-align: center;
-            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+        .feature-card:hover {
+            border-color: #3b82f6 !important;
+            transform: translateY(-2px);
+        }
+        .feature-card h3 {
+            color: #60a5fa !important;
+            margin-bottom: 12px;
+            font-weight: 700;
+        }
+        .feature-card p {
+            color: #d1d5db !important;
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+        /* Custom Launch Button Styling */
+        div.stButton > button {
+            background: linear-gradient(90deg, #4f46e5, #06b6d4) !important;
+            color: #ffffff !important;
+            font-size: 1.15rem !important;
+            font-weight: 700 !important;
+            padding: 14px 28px !important;
+            border-radius: 12px !important;
+            border: none !important;
+            box-shadow: 0 4px 15px rgba(79, 70, 229, 0.4) !important;
+            transition: all 0.3s ease !important;
+        }
+        div.stButton > button:hover {
+            background: linear-gradient(90deg, #4338ca, #0891b2) !important;
+            box-shadow: 0 6px 20px rgba(6, 182, 212, 0.6) !important;
+            transform: scale(1.02);
+            color: #ffffff !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -103,6 +164,22 @@ if not st.session_state.launched:
             st.rerun()
 
 else:
+    # Read query params from URL quietly in background
+    query_params = st.query_params
+    mode_param = query_params.get("mode", "editor")
+    dashboard_id_param = query_params.get("dashboard_id", None)
+    is_editor = (mode_param == "editor")
+
+    # Load shared dashboard state if dashboard_id is provided in URL
+    if dashboard_id_param and "df" not in st.session_state:
+        saved_state = load_dashboard(dashboard_id_param)
+        if saved_state:
+            st.session_state.df = pd.DataFrame(saved_state.get("data", {}))
+            st.session_state.file_name = "shared_dashboard.csv"
+            st.success(f"Loaded shared dashboard ID: {dashboard_id_param}")
+        else:
+            st.error("Shared dashboard not found or expired.")
+
     # -------------------------------------------------------------------
     # Main Dashboard Workspace
     # -------------------------------------------------------------------
@@ -112,23 +189,26 @@ else:
     st.sidebar.header("📊 Agentic Analytics Hub")
     st.sidebar.success("💡 Enterprise AI Data Studio & Autonomous Visualization Suite.")
 
-    # Read query params from URL quietly in background
-    query_params = st.query_params
-    mode_param = query_params.get("mode", "editor")
-    is_editor = (mode_param == "editor")
-
     st.sidebar.markdown("---")
 
-    # Clean Interactive Share Expander
+    # Clean Interactive Share Expander with Unique Dashboard Link Generation
     with st.sidebar.expander("🔗 Share Dashboard Links"):
+        dashboard_name_input = st.text_input("Dashboard Name", value="My-Custom-Dashboard")
         selected_role = st.radio("Select Access Level:", ["Editor (Full Access)", "Viewer (Read Only)"], key="share_mode_select")
         
-        base_url = "https://agentic-analytics-dashboard-globally.streamlit.app/" # Deployment ke baad yahan apna live domain daal dena
+        base_url = "https://agentic-analytics-dashboard-globally.streamlit.app/" # Live domain
         target_mode = "editor" if "Editor" in selected_role else "viewer"
-        generated_link = f"{base_url}/?mode={target_mode}"
         
-        st.markdown(f"**Copy {selected_role.split()[0]} Link:**")
-        st.code(generated_link, language="text")
+        if st.button("Generate Unique Link"):
+            if "df" in st.session_state and st.session_state.df is not None:
+                df_dict = st.session_state.df.to_dict(orient="list")
+                state_payload = {"data": df_dict}
+                unique_id = save_dashboard(state_payload, dashboard_name_input)
+                generated_link = f"{base_url}?dashboard_id={unique_id}&mode={target_mode}"
+                st.success("Link generated successfully!")
+                st.code(generated_link, language="text")
+            else:
+                st.warning("Please upload a dataset first to generate a unique link!")
 
     uploaded_file = st.sidebar.file_uploader("Upload CSV or Excel Dataset", type=["csv", "xlsx", "xls"])
 
@@ -140,6 +220,7 @@ else:
                 st.session_state.df = pd.read_excel(uploaded_file)
             st.session_state.file_name = uploaded_file.name
 
+    if "df" in st.session_state and st.session_state.df is not None:
         df = st.session_state.df
 
         # Column lists
@@ -318,7 +399,7 @@ else:
             }}
             """
 
-            candidate_models = ["gemini-3.8-flash"]
+            candidate_models = ["gemini-2.5-flash", "gemini-3.8-flash"]
             response = None
 
             for model_name in candidate_models:
