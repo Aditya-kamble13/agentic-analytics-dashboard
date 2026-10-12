@@ -39,7 +39,6 @@ def save_dashboard(state_data, dashboard_name):
     unique_id = f"{clean_name}-{str(uuid.uuid4())[:8]}"
     file_path = os.path.join(DATA_DIR, f"{unique_id}.json")
     
-    # Ensure all data in dataframe dictionary is JSON serializable (convert timestamps/objects to string)
     clean_payload = {}
     if "data" in state_data and state_data["data"]:
         temp_df = pd.DataFrame(state_data["data"])
@@ -49,6 +48,10 @@ def save_dashboard(state_data, dashboard_name):
     
     clean_payload["ai_explanation"] = state_data.get("ai_explanation", "")
     
+    # Save Plotly figure as JSON dict so it renders properly when loaded via link
+    if "fig_json" in state_data and state_data["fig_json"]:
+        clean_payload["fig_json"] = state_data["fig_json"]
+        
     with open(file_path, "w") as f:
         json.dump(clean_payload, f)
     return unique_id
@@ -173,6 +176,11 @@ else:
             st.session_state.df = pd.DataFrame(saved_state.get("data", {}))
             st.session_state.file_name = "shared_dashboard.csv"
             st.session_state.ai_explanation = saved_state.get("ai_explanation", "Loaded from shared link.")
+            
+            # Restore saved Plotly figure if present
+            if "fig_json" in saved_state and saved_state["fig_json"]:
+                st.session_state.custom_fig = go.Figure(saved_state["fig_json"])
+            
             # Auto-skip landing page when opening a shared unique link
             st.session_state.launched = True
         else:
@@ -202,9 +210,14 @@ else:
         if st.button("Generate Unique Link"):
             if "df" in st.session_state and st.session_state.df is not None:
                 df_dict = st.session_state.df.to_dict(orient="list")
+                
+                # Serialize current Plotly figure if available
+                fig_json_data = st.session_state.custom_fig.to_plotly_json() if st.session_state.get("custom_fig") is not None else None
+                
                 state_payload = {
                     "data": df_dict,
-                    "ai_explanation": st.session_state.get("ai_explanation", "Default analytics summary.")
+                    "ai_explanation": st.session_state.get("ai_explanation", "Default analytics summary."),
+                    "fig_json": fig_json_data
                 }
                 unique_id = save_dashboard(state_payload, dashboard_name_input)
                 generated_link = f"{base_url}?dashboard_id={unique_id}&mode={target_mode}"
@@ -487,13 +500,31 @@ else:
         st.markdown("---")
         st.subheader("📊 Dynamic Visual Output")
 
+        # Render custom figure if exists, otherwise generate default bar view
         if st.session_state.custom_fig is not None:
             st.plotly_chart(st.session_state.custom_fig, use_container_width=True)
+            
+            # Download & Export Visual Option for both Editors and Viewers
+            chart_html = st.session_state.custom_fig.to_html(include_plotlyjs='cdn')
+            st.download_button(
+                label="📥 Download Chart as HTML",
+                data=chart_html,
+                file_name="analytics_chart.html",
+                mime="text/html"
+            )
         else:
             if len(cat_cols) > 0 and len(num_cols) > 0:
                 default_df = df.groupby(cat_cols[0], as_index=False)[num_cols[0]].sum().head(10)
                 default_fig = px.bar(default_df, x=cat_cols[0], y=num_cols[0], title=f"{num_cols[0]} by {cat_cols[0]} (Default View)")
                 st.plotly_chart(default_fig, use_container_width=True)
+                
+                chart_html = default_fig.to_html(include_plotlyjs='cdn')
+                st.download_button(
+                    label="📥 Download Chart as HTML",
+                    data=chart_html,
+                    file_name="default_analytics_chart.html",
+                    mime="text/html"
+                )
 
     else:
         st.info("👈 Please upload a CSV or Excel file from the sidebar to get started.")
