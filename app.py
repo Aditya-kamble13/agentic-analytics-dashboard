@@ -38,8 +38,19 @@ def save_dashboard(state_data, dashboard_name):
     clean_name = "".join([c if c.isalnum() else "-" for c in dashboard_name.lower()])
     unique_id = f"{clean_name}-{str(uuid.uuid4())[:8]}"
     file_path = os.path.join(DATA_DIR, f"{unique_id}.json")
+    
+    # Ensure all data in dataframe dictionary is JSON serializable (convert timestamps/objects to string)
+    clean_payload = {}
+    if "data" in state_data and state_data["data"]:
+        temp_df = pd.DataFrame(state_data["data"])
+        for col in temp_df.columns:
+            temp_df[col] = temp_df[col].astype(str)
+        clean_payload["data"] = temp_df.to_dict(orient="list")
+    
+    clean_payload["ai_explanation"] = state_data.get("ai_explanation", "")
+    
     with open(file_path, "w") as f:
-        json.dump(state_data, f)
+        json.dump(clean_payload, f)
     return unique_id
 
 def load_dashboard(dashboard_id):
@@ -54,12 +65,11 @@ if "launched" not in st.session_state:
     st.session_state.launched = False
 
 # -------------------------------------------------------------------
-# Futuristic Landing / Welcome Page (Dark Top Header & UI Fix)
+# Futuristic Landing / Welcome Page (Dark Theme & Header Fix)
 # -------------------------------------------------------------------
 if not st.session_state.launched:
     st.markdown("""
         <style>
-        /* Dark Theme Canvas & Header Bar Fix */
         .stApp {
             background-color: #0b0f19 !important;
             color: #ffffff !important;
@@ -89,11 +99,6 @@ if not st.session_state.launched:
             border-radius: 16px;
             text-align: center;
             box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
-            transition: transform 0.2s ease, border-color 0.2s ease;
-        }
-        .feature-card:hover {
-            border-color: #3b82f6 !important;
-            transform: translateY(-2px);
         }
         .feature-card h3 {
             color: #60a5fa !important;
@@ -105,7 +110,6 @@ if not st.session_state.launched:
             font-size: 0.95rem;
             line-height: 1.6;
         }
-        /* Custom Launch Button Styling */
         div.stButton > button {
             background: linear-gradient(90deg, #4f46e5, #06b6d4) !important;
             color: #ffffff !important;
@@ -115,13 +119,6 @@ if not st.session_state.launched:
             border-radius: 12px !important;
             border: none !important;
             box-shadow: 0 4px 15px rgba(79, 70, 229, 0.4) !important;
-            transition: all 0.3s ease !important;
-        }
-        div.stButton > button:hover {
-            background: linear-gradient(90deg, #4338ca, #0891b2) !important;
-            box-shadow: 0 6px 20px rgba(6, 182, 212, 0.6) !important;
-            transform: scale(1.02);
-            color: #ffffff !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -156,7 +153,6 @@ if not st.session_state.launched:
 
     st.markdown("<br><br>", unsafe_allow_html=True)
     
-    # Centered Launch Button
     c_l1, c_l2, c_l3 = st.columns([1, 2, 1])
     with c_l2:
         if st.button("🚀 Launch Agentic Workspace", use_container_width=True):
@@ -170,13 +166,15 @@ else:
     dashboard_id_param = query_params.get("dashboard_id", None)
     is_editor = (mode_param == "editor")
 
-    # Load shared dashboard state if dashboard_id is provided in URL
+    # Load shared dashboard state automatically if dashboard_id is provided in URL
     if dashboard_id_param and "df" not in st.session_state:
         saved_state = load_dashboard(dashboard_id_param)
         if saved_state:
             st.session_state.df = pd.DataFrame(saved_state.get("data", {}))
             st.session_state.file_name = "shared_dashboard.csv"
-            st.success(f"Loaded shared dashboard ID: {dashboard_id_param}")
+            st.session_state.ai_explanation = saved_state.get("ai_explanation", "Loaded from shared link.")
+            # Auto-skip landing page when opening a shared unique link
+            st.session_state.launched = True
         else:
             st.error("Shared dashboard not found or expired.")
 
@@ -185,24 +183,29 @@ else:
     # -------------------------------------------------------------------
     st.title("🚀 Universal Agentic Analytics Dashboard")
 
-    # Sidebar: Branding & Role Detection via URL Query Parameters
     st.sidebar.header("📊 Agentic Analytics Hub")
-    st.sidebar.success("💡 Enterprise AI Data Studio & Autonomous Visualization Suite.")
+    if is_editor:
+        st.sidebar.success("✏️ **Editor Mode**: Full access enabled.")
+    else:
+        st.sidebar.info("🔒 **Viewer Mode**: Read-only access.")
 
     st.sidebar.markdown("---")
 
-    # Clean Interactive Share Expander with Unique Dashboard Link Generation
+    # Clean Interactive Share Expander
     with st.sidebar.expander("🔗 Share Dashboard Links"):
         dashboard_name_input = st.text_input("Dashboard Name", value="My-Custom-Dashboard")
         selected_role = st.radio("Select Access Level:", ["Editor (Full Access)", "Viewer (Read Only)"], key="share_mode_select")
         
-        base_url = "https://agentic-analytics-dashboard-globally.streamlit.app/" # Live domain
+        base_url = "https://agentic-analytics-dashboard-globally.streamlit.app/"
         target_mode = "editor" if "Editor" in selected_role else "viewer"
         
         if st.button("Generate Unique Link"):
             if "df" in st.session_state and st.session_state.df is not None:
                 df_dict = st.session_state.df.to_dict(orient="list")
-                state_payload = {"data": df_dict}
+                state_payload = {
+                    "data": df_dict,
+                    "ai_explanation": st.session_state.get("ai_explanation", "Default analytics summary.")
+                }
                 unique_id = save_dashboard(state_payload, dashboard_name_input)
                 generated_link = f"{base_url}?dashboard_id={unique_id}&mode={target_mode}"
                 st.success("Link generated successfully!")
@@ -210,24 +213,25 @@ else:
             else:
                 st.warning("Please upload a dataset first to generate a unique link!")
 
-    uploaded_file = st.sidebar.file_uploader("Upload CSV or Excel Dataset", type=["csv", "xlsx", "xls"])
-
-    if uploaded_file is not None:
-        if "df" not in st.session_state or st.session_state.get("file_name") != uploaded_file.name:
-            if uploaded_file.name.endswith(".csv"):
-                st.session_state.df = pd.read_csv(uploaded_file)
-            else:
-                st.session_state.df = pd.read_excel(uploaded_file)
-            st.session_state.file_name = uploaded_file.name
+    # File uploader is only available for editors
+    if is_editor:
+        uploaded_file = st.sidebar.file_uploader("Upload CSV or Excel Dataset", type=["csv", "xlsx", "xls"])
+        if uploaded_file is not None:
+            if "df" not in st.session_state or st.session_state.get("file_name") != uploaded_file.name:
+                if uploaded_file.name.endswith(".csv"):
+                    st.session_state.df = pd.read_csv(uploaded_file)
+                else:
+                    st.session_state.df = pd.read_excel(uploaded_file)
+                st.session_state.file_name = uploaded_file.name
+    else:
+        st.sidebar.info("📁 File uploading is disabled in Viewer Mode.")
 
     if "df" in st.session_state and st.session_state.df is not None:
         df = st.session_state.df
 
-        # Column lists
         num_cols = df.select_dtypes(include=['number']).columns.tolist()
         cat_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
 
-        # Session State Initialization
         if "custom_fig" not in st.session_state:
             st.session_state.custom_fig = None
         if "ai_explanation" not in st.session_state:
@@ -236,7 +240,7 @@ else:
             st.session_state.last_error = None
 
         # -------------------------------------------------------------------
-        # Step 1: AI Data Hygiene Agent
+        # Step 1: AI Data Hygiene Agent (Disabled for Viewers)
         # -------------------------------------------------------------------
         st.header("🛠️ Step 1: AI Data Hygiene Agent")
 
@@ -251,59 +255,63 @@ else:
         col_m3.metric("Null Records", null_records)
         col_m4.metric("Duplicate Rows", duplicate_rows)
 
-        c1, c2 = st.columns(2)
-
-        with c1:
-            if st.button("🧹 Clean Missing Values", disabled=not is_editor):
-                temp_df = st.session_state.df.dropna(how='all', axis=1)
-                unnamed_cols = [col for col in temp_df.columns if 'Unnamed' in str(col)]
-                for col in unnamed_cols:
-                    if temp_df[col].isnull().sum() / len(temp_df) > 0.5:
-                        temp_df = temp_df.drop(columns=[col])
-                
-                for col in temp_df.select_dtypes(include=['object', 'category']).columns:
-                    temp_df[col] = temp_df[col].fillna("N/A")
+        if is_editor:
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("🧹 Clean Missing Values"):
+                    temp_df = st.session_state.df.dropna(how='all', axis=1)
+                    unnamed_cols = [col for col in temp_df.columns if 'Unnamed' in str(col)]
+                    for col in unnamed_cols:
+                        if temp_df[col].isnull().sum() / len(temp_df) > 0.5:
+                            temp_df = temp_df.drop(columns=[col])
                     
-                for col in temp_df.select_dtypes(include=['number']).columns:
-                    temp_df[col] = temp_df[col].fillna(0)
-                    
-                st.session_state.df = temp_df.dropna(how='all', axis=0)
-                st.success("Missing values cleaned!")
-                st.rerun()
+                    for col in temp_df.select_dtypes(include=['object', 'category']).columns:
+                        temp_df[col] = temp_df[col].fillna("N/A")
+                        
+                    for col in temp_df.select_dtypes(include=['number']).columns:
+                        temp_df[col] = temp_df[col].fillna(0)
+                        
+                    st.session_state.df = temp_df.dropna(how='all', axis=0)
+                    st.success("Missing values cleaned!")
+                    st.rerun()
 
-        with c2:
-            if st.button("🗑️ Remove Duplicate Records", disabled=not is_editor):
-                st.session_state.df = st.session_state.df.drop_duplicates()
-                st.success("Duplicates removed!")
-                st.rerun()
+            with c2:
+                if st.button("🗑️ Remove Duplicate Records"):
+                    st.session_state.df = st.session_state.df.drop_duplicates()
+                    st.success("Duplicates removed!")
+                    st.rerun()
+        else:
+            st.info("ℹ️ Data cleaning options are restricted in Viewer Mode.")
 
         st.markdown("---")
 
         # -------------------------------------------------------------------
         # Step 2: Download Cleaned Data
         # -------------------------------------------------------------------
-        st.header("📥 Step 2: Download Cleaned Data")
+        st.header("📥 Step 2: Dataset & Export")
+        st.dataframe(df.head(10), use_container_width=True)
 
-        d_col1, d_col2, d_col3, d_col4 = st.columns(4)
-        csv_bytes = st.session_state.df.to_csv(index=False).encode('utf-8')
-        d_col1.download_button("📄 Download CSV", csv_bytes, "cleaned_data.csv", "text/csv")
+        if is_editor:
+            d_col1, d_col2, d_col3, d_col4 = st.columns(4)
+            csv_bytes = st.session_state.df.to_csv(index=False).encode('utf-8')
+            d_col1.download_button("📄 Download CSV", csv_bytes, "cleaned_data.csv", "text/csv")
 
-        output_xlsx = io.BytesIO()
-        with pd.ExcelWriter(output_xlsx, engine='openpyxl') as writer:
-            st.session_state.df.to_excel(writer, index=False, sheet_name='CleanedData')
-        d_col2.download_button("📊 Download XLSX", output_xlsx.getvalue(), "cleaned_data.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        d_col3.download_button("📁 Download XLS", output_xlsx.getvalue(), "cleaned_data.xls", "application/vnd.ms-excel")
+            output_xlsx = io.BytesIO()
+            with pd.ExcelWriter(output_xlsx, engine='openpyxl') as writer:
+                st.session_state.df.to_excel(writer, index=False, sheet_name='CleanedData')
+            d_col2.download_button("📊 Download XLSX", output_xlsx.getvalue(), "cleaned_data.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            d_col3.download_button("📁 Download XLS", output_xlsx.getvalue(), "cleaned_data.xls", "application/vnd.ms-excel")
 
-        def dataframe_to_xml(df_in):
-            root = ET.Element("dataset")
-            for _, row in df_in.iterrows():
-                item = ET.SubElement(root, "record")
-                for col in df_in.columns:
-                    child = ET.SubElement(item, str(col).replace(" ", "_"))
-                    child.text = str(row[col])
-            return ET.tostring(root, encoding='utf-8')
+            def dataframe_to_xml(df_in):
+                root = ET.Element("dataset")
+                for _, row in df_in.iterrows():
+                    item = ET.SubElement(root, "record")
+                    for col in df_in.columns:
+                        child = ET.SubElement(item, str(col).replace(" ", "_"))
+                        child.text = str(row[col])
+                return ET.tostring(root, encoding='utf-8')
 
-        d_col4.download_button("🏷️ Download XML", dataframe_to_xml(st.session_state.df), "cleaned_data.xml", "application/xml")
+            d_col4.download_button("🏷️ Download XML", dataframe_to_xml(st.session_state.df), "cleaned_data.xml", "application/xml")
 
         st.markdown("---")
 
@@ -456,21 +464,25 @@ else:
                 st.session_state.custom_fig = fig
                 st.session_state.ai_explanation = exp
 
-        user_prompt = st.text_input(
-            "Specify ANY visual type or analysis method:",
-            placeholder="e.g. 'use map', 'use pie chat and donut chart', 'scatter plot'",
-            key="viz_user_prompt",
-            on_change=run_ai_visualization
-        )
+        # AI Prompt Input & Button are strictly available only to Editors
+        if is_editor:
+            user_prompt = st.text_input(
+                "Specify ANY visual type or analysis method:",
+                placeholder="e.g. 'use map', 'use pie chat and donut chart', 'scatter plot'",
+                key="viz_user_prompt",
+                on_change=run_ai_visualization
+            )
 
-        if st.button("🚀 Generate Any Visual via AI", disabled=not is_editor):
-            run_ai_visualization()
+            if st.button("🚀 Generate Any Visual via AI"):
+                run_ai_visualization()
+        else:
+            st.info("🔒 **Viewer Mode**: AI visualization prompt generation is locked. You are viewing the pre-configured shared dashboard insights below.")
 
         if st.session_state.last_error:
             st.error(f"❌ **Error:** {st.session_state.last_error}")
 
         if st.session_state.ai_explanation:
-            st.info(f"💡 **AI Assistant Insight:** {st.session_state.ai_explanation}")
+            st.info(f"💡 **AI Assistant Insight & Description:** {st.session_state.ai_explanation}")
 
         st.markdown("---")
         st.subheader("📊 Dynamic Visual Output")
