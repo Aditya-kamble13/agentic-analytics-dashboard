@@ -4,3 +4,4 @@ plotly>=5.18.0
 openpyxl>=3.1.0
 google-genai
 python-dotenv>=1.0.0
+geopy>=2.3.0
