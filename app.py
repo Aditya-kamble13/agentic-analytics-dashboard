@@ -46,14 +46,18 @@ def save_dashboard(state_data, dashboard_name):
             temp_df[col] = temp_df[col].astype(str)
         clean_payload["data"] = temp_df.to_dict(orient="list")
     
-    clean_payload["ai_explanation"] = state_data.get("ai_explanation", "")
+    clean_payload["ai_explanation"] = str(state_data.get("ai_explanation", ""))
     
-    # Save Plotly figure as JSON dict so it renders properly when loaded via link
+    # Safely handle fig_json serialization using default string conversion for non-JSON objects
     if "fig_json" in state_data and state_data["fig_json"]:
-        clean_payload["fig_json"] = state_data["fig_json"]
+        try:
+            # Test serialization to strip any non-compliant types safely
+            clean_payload["fig_json"] = json.loads(json.dumps(state_data["fig_json"], default=str))
+        except Exception:
+            clean_payload["fig_json"] = None
         
     with open(file_path, "w") as f:
-        json.dump(clean_payload, f)
+        json.dump(clean_payload, f, default=str)
     return unique_id
 
 def load_dashboard(dashboard_id):
@@ -179,7 +183,10 @@ else:
             
             # Restore saved Plotly figure if present
             if "fig_json" in saved_state and saved_state["fig_json"]:
-                st.session_state.custom_fig = go.Figure(saved_state["fig_json"])
+                try:
+                    st.session_state.custom_fig = go.Figure(saved_state["fig_json"])
+                except Exception:
+                    st.session_state.custom_fig = None
             
             # Auto-skip landing page when opening a shared unique link
             st.session_state.launched = True
@@ -505,26 +512,32 @@ else:
             st.plotly_chart(st.session_state.custom_fig, use_container_width=True)
             
             # Download & Export Visual Option for both Editors and Viewers
-            chart_html = st.session_state.custom_fig.to_html(include_plotlyjs='cdn')
-            st.download_button(
-                label="📥 Download Chart as HTML",
-                data=chart_html,
-                file_name="analytics_chart.html",
-                mime="text/html"
-            )
+            try:
+                chart_html = st.session_state.custom_fig.to_html(include_plotlyjs='cdn')
+                st.download_button(
+                    label="📥 Download Chart as HTML",
+                    data=chart_html,
+                    file_name="analytics_chart.html",
+                    mime="text/html"
+                )
+            except Exception:
+                pass
         else:
             if len(cat_cols) > 0 and len(num_cols) > 0:
                 default_df = df.groupby(cat_cols[0], as_index=False)[num_cols[0]].sum().head(10)
                 default_fig = px.bar(default_df, x=cat_cols[0], y=num_cols[0], title=f"{num_cols[0]} by {cat_cols[0]} (Default View)")
                 st.plotly_chart(default_fig, use_container_width=True)
                 
-                chart_html = default_fig.to_html(include_plotlyjs='cdn')
-                st.download_button(
-                    label="📥 Download Chart as HTML",
-                    data=chart_html,
-                    file_name="default_analytics_chart.html",
-                    mime="text/html"
-                )
+                try:
+                    chart_html = default_fig.to_html(include_plotlyjs='cdn')
+                    st.download_button(
+                        label="📥 Download Chart as HTML",
+                        data=chart_html,
+                        file_name="default_analytics_chart.html",
+                        mime="text/html"
+                    )
+                except Exception:
+                    pass
 
     else:
         st.info("👈 Please upload a CSV or Excel file from the sidebar to get started.")
