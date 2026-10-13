@@ -297,37 +297,36 @@ else:
         st.markdown("---")
 
         # -------------------------------------------------------------------
-        # Step 2: Download Cleaned Data
+        # Step 2: Download Cleaned Data (Available for both Editors and Viewers)
         # -------------------------------------------------------------------
         st.header("📥 Step 2: Dataset & Export")
         st.dataframe(df.head(10), use_container_width=True)
 
-        if is_editor:
-            d_col1, d_col2, d_col3, d_col4 = st.columns(4)
-            csv_bytes = st.session_state.df.to_csv(index=False).encode('utf-8')
-            d_col1.download_button("📄 Download CSV", csv_bytes, "cleaned_data.csv", "text/csv")
+        d_col1, d_col2, d_col3, d_col4 = st.columns(4)
+        csv_bytes = st.session_state.df.to_csv(index=False).encode('utf-8')
+        d_col1.download_button("📄 Download CSV", csv_bytes, "cleaned_data.csv", "text/csv")
 
-            output_xlsx = io.BytesIO()
-            with pd.ExcelWriter(output_xlsx, engine='openpyxl') as writer:
-                st.session_state.df.to_excel(writer, index=False, sheet_name='CleanedData')
-            d_col2.download_button("📊 Download XLSX", output_xlsx.getvalue(), "cleaned_data.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            d_col3.download_button("📁 Download XLS", output_xlsx.getvalue(), "cleaned_data.xls", "application/vnd.ms-excel")
+        output_xlsx = io.BytesIO()
+        with pd.ExcelWriter(output_xlsx, engine='openpyxl') as writer:
+            st.session_state.df.to_excel(writer, index=False, sheet_name='CleanedData')
+        d_col2.download_button("📊 Download XLSX", output_xlsx.getvalue(), "cleaned_data.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        d_col3.download_button("📁 Download XLS", output_xlsx.getvalue(), "cleaned_data.xls", "application/vnd.ms-excel")
 
-            def dataframe_to_xml(df_in):
-                root = ET.Element("dataset")
-                for _, row in df_in.iterrows():
-                    item = ET.SubElement(root, "record")
-                    for col in df_in.columns:
-                        child = ET.SubElement(item, str(col).replace(" ", "_"))
-                        child.text = str(row[col])
-                return ET.tostring(root, encoding='utf-8')
+        def dataframe_to_xml(df_in):
+            root = ET.Element("dataset")
+            for _, row in df_in.iterrows():
+                item = ET.SubElement(root, "record")
+                for col in df_in.columns:
+                    child = ET.SubElement(item, str(col).replace(" ", "_"))
+                    child.text = str(row[col])
+            return ET.tostring(root, encoding='utf-8')
 
-            d_col4.download_button("🏷️ Download XML", dataframe_to_xml(st.session_state.df), "cleaned_data.xml", "application/xml")
+        d_col4.download_button("🏷️ Download XML", dataframe_to_xml(st.session_state.df), "cleaned_data.xml", "application/xml")
 
         st.markdown("---")
 
         # -------------------------------------------------------------------
-        # Geocoding Map Visual Generator Function (Clean Title)
+        # Geocoding Map Visual Generator Function
         # -------------------------------------------------------------------
         def generate_geocoded_map(grouped_data, location_column, value_column):
             geolocator = Nominatim(user_agent="agentic_analytics_dashboard_app")
