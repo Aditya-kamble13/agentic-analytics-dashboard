@@ -297,7 +297,7 @@ else:
         st.markdown("---")
 
         # -------------------------------------------------------------------
-        # Step 2: Download Cleaned Data (Available for both Editors and Viewers)
+        # Step 2: Download Cleaned Data (Enabled for both Editor & Viewer)
         # -------------------------------------------------------------------
         st.header("📥 Step 2: Dataset & Export")
         st.dataframe(df.head(10), use_container_width=True)
@@ -326,7 +326,7 @@ else:
         st.markdown("---")
 
         # -------------------------------------------------------------------
-        # Geocoding Map Visual Generator Function
+        # Geocoding Map Visual Generator Function (Clean Title)
         # -------------------------------------------------------------------
         def generate_geocoded_map(grouped_data, location_column, value_column):
             geolocator = Nominatim(user_agent="agentic_analytics_dashboard_app")
